@@ -151,6 +151,30 @@ function describableReasoningLevel(
     : undefined
 }
 
+/**
+ * Reclassify a terminal error finish as a caller abort when the caller's
+ * signal is set. pi-ai delivers a pre-request abort as a lazy-stream setup
+ * failure, which its wrapper terminates with stopReason `error` — the Harness
+ * contract says a caller abort is an abort, never an error. Mid-stream aborts
+ * already arrive with stopReason `aborted` and pass through unchanged.
+ * @param chunk - the next chunk of the pi-ai stream translation.
+ * @param signal - the caller's signal, when one was given.
+ * @returns the chunk, with an error finish rewritten to an aborted one when
+ *   the caller signal is set.
+ */
+function classifyCallerAbort(chunk: StreamChunk, signal?: AbortSignal): StreamChunk {
+  if (signal?.aborted && chunk.type === 'finish' && chunk.reason.kind === 'error') {
+    return {
+      ...chunk,
+      reason: {
+        kind: 'aborted',
+        failure: { message: chunk.reason.failure.message, code: 'ABORTED' },
+      },
+    }
+  }
+  return chunk
+}
+
 /** Validate an explicit Harness/profile effort without invoking pi-ai's clamp. */
 function resolveReasoningLevel(
   model: Model<Api>,
@@ -385,7 +409,7 @@ export class PiAiAdapter extends LlmAdapter {
             exhausted = true
             return
           }
-          yield result.value
+          yield classifyCallerAbort(result.value, options.signal)
         }
       } finally {
         if (!exhausted) {

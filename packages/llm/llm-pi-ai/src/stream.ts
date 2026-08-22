@@ -108,6 +108,20 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
       kind: 'aborted',
       failure: { message: message.errorMessage ?? 'pi-ai stream aborted', code: 'ABORTED' },
     }
+    case 'pending': return {
+      kind: 'error',
+      failure: {
+        message: message.errorMessage ?? 'pi-ai stream ended without a finish reason',
+        code: 'TRANSPORT',
+      },
+    }
+    case 'deferred': return {
+      kind: 'error',
+      failure: {
+        message: 'pi-ai deferred a response the harness does not fetch',
+        code: 'PI_AI_ERROR',
+      },
+    }
     case 'error': {
       const text = message.errorMessage ?? 'pi-ai stream error'
       return { kind: 'error', failure: { message: text, code: classifyPiAiError(text) } }

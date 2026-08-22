@@ -106,6 +106,7 @@ const THINKING_FORMAT_GATE: Record<PiAiThinkingFormat, true> = {
   'qwen-chat-template': true,
   'string-thinking': true,
   'ant-ling': true,
+  'baseten': true,
 }
 
 /** Reasoning-dispatch wire formats a profile may name, most-reached first. */
@@ -227,6 +228,8 @@ const COMPLETIONS_COMPAT_GATE = {
   supportsStrictMode: 'offer',
   cacheControlFormat: 'offer',
   supportsLongCacheRetention: 'offer',
+  supportsFinishReason: 'offer',
+  supportsThinkingTokenBudget: 'offer',
   openRouterRouting: 'withhold',
   vercelGatewayRouting: 'withhold',
   zaiToolStream: 'withhold',
@@ -234,6 +237,7 @@ const COMPLETIONS_COMPAT_GATE = {
   sendSessionAffinityHeaders: 'withhold',
   deferredToolsMode: 'withhold',
   sessionAffinityFormat: 'withhold',
+  chatTemplateArgs: 'withhold',
 } as const satisfies Record<keyof OpenAICompletionsCompat, CompatDisposition>
 
 /** Disposition of every `OpenAIResponsesCompat` field; a drift gate like the one above. */
@@ -241,6 +245,7 @@ const RESPONSES_COMPAT_GATE = {
   supportsDeveloperRole: 'offer',
   supportsStrictMode: 'offer',
   supportsLongCacheRetention: 'offer',
+  supportsAdditionalTools: 'offer',
   sessionAffinityFormat: 'withhold',
   supportsOpenAIGrammarTools: 'withhold',
   supportsToolSearch: 'withhold',
@@ -376,6 +381,20 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `anthropic-messages`.
    */
   supportsLongCacheRetention?: boolean
+  /**
+   * Whether a stream that ends without a `finish_reason` is an error;
+   * `false` tolerates it (an endpoint that never sends one) and reads the
+   * turn's stop from its content instead; `openai-completions`.
+   */
+  supportsFinishReason?: boolean
+  /**
+   * Whether the endpoint caps reasoning with a top-level
+   * `thinking_token_budget` instead of a `thinking` block (vLLM servers);
+   * `openai-completions`.
+   */
+  supportsThinkingTokenBudget?: boolean
+  /** Whether the endpoint accepts additional tools in the Responses `tools` array; the three Responses protocols. */
+  supportsAdditionalTools?: boolean
   /** Whether the endpoint accepts per-tool `eager_input_streaming`; `anthropic-messages`. */
   supportsEagerToolInputStreaming?: boolean
   /** Whether the endpoint accepts `cache_control` on tool definitions; `anthropic-messages`. */
