@@ -36,6 +36,13 @@ interface EffortChoice {
   description?: string
 }
 
+const toLowerCaseExceptDefault = (text: string | undefined): string | undefined => {
+  if (text === 'Default') {
+    return text
+  }
+  return text?.toLowerCase()
+}
+
 /**
  * Render the composer model seat.
  * @param props - owner share (locked) + injected face (shared directory
@@ -237,7 +244,7 @@ export function ModelSelect(
         }}
       >
         <span className={css.triggerLabel}>{modelLabel}</span>
-        {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
+        {effortLabel !== undefined && <span className={css.triggerEffort} style={{ color: 'var(--dsw-static-amber-500)' }}>{toLowerCaseExceptDefault(effortLabel)}</span>}
         <IconChevronDownOutline14 className={clsx(css.chevron, open && css.chevronOpen)} />
       </button>
 
@@ -259,7 +266,7 @@ export function ModelSelect(
               {reasoning !== undefined && (
                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { setPane('effort') }}>
                   <span className={css.cellLabel}>{t('menu.effort')}</span>
-                  <span className={css.cellValue}>{effortLabel}</span>
+                  <span className={css.cellValue}>{toLowerCaseExceptDefault(effortLabel)}</span>
                   <IconChevronRightOutline14 className={css.cellChevron} />
                 </button>
               )}
@@ -347,7 +354,7 @@ export function ModelSelect(
                     onClick={() => { chooseEffort(level.effort) }}
                   >
                     <span className={css.optionCopy}>
-                      <span className={css.modelName}>{level.label}</span>
+                      <span className={css.modelName}>{toLowerCaseExceptDefault(level.label)}</span>
                       {level.description !== undefined && (
                         <span className={css.description}>{level.description}</span>
                       )}
