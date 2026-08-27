@@ -35,6 +35,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentReportDelivery } from '@deepseek-ai/dsh-subagent'
 import * as ToolSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
 import * as ToolSubagentListAgents from '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+import * as ToolSubagentOrchestrate from '@deepseek-ai/dsh-tool-subagent-orchestrate'
 import * as ToolSubagentReport from '@deepseek-ai/dsh-tool-subagent-report'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
@@ -104,7 +105,7 @@ const OUT = 'docs/tool-catalog.md'
 function registerCatalogSubagentProvider(ctx: Context, name: string): void {
   const provider: SubagentProvider = {
     name,
-    capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true },
+    capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: true, reasoningEffort: true },
     inheritsParentContext: false,
     start: () => Promise.reject(new Error('tool-catalog provider cannot start a child')),
     // Declared so consumers configured for continuable background mode mount.
@@ -466,6 +467,25 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'The registered tool name is the load-time `toolName` config (default `subagent`); the schema above is that default. The shipped compositions load this package once per subagent backend, so the model additionally sees `subagent_fork` bound to the fork backend. Each instance\'s description, `run_in_background` parameter, and system-prompt policy follow its own `backgroundMode` and `enableRunInBackground`, so the two shipped schemas are not identical: `subagent` is `continuable` and defaults omitted calls to background with automatic settlement delivery, while `subagent_fork` stays `one-shot` and defaults them to foreground — see `packages/bundle/base/cordis.patch.yml` and `examples/acp-agent/cordis.yml`.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-subagent-orchestrate',
+    dir: 'tool-subagent-orchestrate',
+    source: 'packages/subagent/tool-subagent-orchestrate/src/index.ts',
+    requires: ['ctx.tools', 'ctx.subagents', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result', 'child session events through the chosen providers'],
+    async mount(ctx) {
+      await ctx.plugin(SubagentRuntime)
+      registerCatalogSubagentProvider(ctx, 'mock')
+      await ctx.plugin(ToolSubagentOrchestrate, { provider: 'mock' })
+    },
+    note:
+      'Opt-in divide-and-conquer fan-out over the same seam as `dsh-tool-subagent`: the model authors the '
+      + 'subtask graph in one call, this package schedules it with maximal legal parallelism (dependency-ordered, '
+      + '`maxConcurrency`-capped), and every settled outcome returns to the calling agent for review. Not part of '
+      + 'any shipped bundle; mount it from a preset or a patch row. Per-subtask provider/model overrides name '
+      + 'registered providers directly, an explicit reasoning effort requires that provider\'s `reasoningEffort` '
+      + 'capability, and a failed subtask transitively skips only its dependents.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-subagent-control',

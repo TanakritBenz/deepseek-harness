@@ -1,4 +1,5 @@
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { LlmModelReasoningInfo } from '@deepseek-ai/dsh-llm'
 import { describe, expect, it } from 'vitest'
 import { Context, symbols, type EffectMeta } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
@@ -32,9 +33,9 @@ async function mountInvariants(ctx: Context): Promise<void> {
  * The parent is a real config agent; the spawn provider creates a real child
  * agent on the same context and we assert its output.
  */
-async function setup(script: Script) {
+async function setup(script: Script, reasoning?: LlmModelReasoningInfo) {
   const ctx = new Context()
-  const adapter = new MockAdapter(script)
+  const adapter = new MockAdapter(script, reasoning)
   await mountAgentLoopTestDependencies(ctx)
   await mountInvariants(ctx)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -282,10 +283,10 @@ describe('dsh-subagent-spawn-in-process', () => {
     await parentHandle.dispose()
   })
 
-  it('advertises every start-time capability (depthLimit, outputSchema, toolFilter, persona)', async () => {
+  it('advertises every start-time capability (depthLimit, outputSchema, toolFilter, persona, reasoningEffort)', async () => {
     const { ctx } = await setup([])
     const provider = ctx.subagents.getProvider('spawn')!
-    expect(provider.capabilities).toEqual({ outputSchema: true, depthLimit: true, toolFilter: true, persona: true })
+    expect(provider.capabilities).toEqual({ outputSchema: true, depthLimit: true, toolFilter: true, persona: true, reasoningEffort: true })
   })
 
   it('unregisters the provider when its fiber is disposed (HMR safety)', async () => {
@@ -399,6 +400,28 @@ describe('dsh-subagent-spawn-in-process', () => {
       expect(childRequest.system).toContain('You are the tersest test runner.')
       // The parent's earlier request carried no such persona.
       expect(adapter.requests[0]!.system ?? '').not.toContain('tersest test runner')
+      await run.dispose()
+    })
+
+    it('a per-child reasoningEffort pins every child request and leaves the parent untouched', async () => {
+      const { ctx, parent, adapter } = await setup(
+        [textResponse('parent answer'), textResponse('child answer')],
+        { efforts: [{ id: ReasoningEffortId('high'), name: 'High' }] },
+      )
+      parent.followup(createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } }))
+      await parent.whenIdle()
+
+      const run = await start(ctx, 'spawn', {
+        prompt: [{ type: 'text', text: 'do X' }],
+        parent,
+        reasoningEffort: ReasoningEffortId('high'),
+      })
+      const result = await run.result
+      expect(result.stopReason).toBe('completed')
+      // The scoped pin rides the child's model request…
+      expect(adapter.requests.at(-1)!.reasoningEffort).toBe('high')
+      // …while the parent's own request stayed on its route default.
+      expect(adapter.requests[0]!.reasoningEffort).toBeUndefined()
       await run.dispose()
     })
 

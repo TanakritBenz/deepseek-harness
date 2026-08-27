@@ -11,7 +11,7 @@
 
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
@@ -88,6 +88,12 @@ export interface SubagentCapabilities {
   readonly depthLimit: boolean
   readonly toolFilter: boolean
   readonly persona: boolean
+  /**
+   * Whether a start request may pin the child's reasoning effort
+   * ({@link SubagentStartRequest.reasoningEffort}). In-process backends pin it
+   * for the child's whole run through a scoped request listener.
+   */
+  readonly reasoningEffort: boolean
 }
 
 /**
@@ -146,6 +152,16 @@ export interface SubagentStartRequest {
    * persona (strict `{{…}}` interpolation against the registered variables).
    */
   readonly persona?: string
+  /**
+   * Optional reasoning effort pinned for every model request of the child's
+   * run. Requires {@link SubagentCapabilities.reasoningEffort}; rejected at
+   * start otherwise. In-process backends install a scoped `agent/request`
+   * listener that overwrites any inherited effort with this value, so the pin
+   * holds across the child's whole run. Absent effort preserves the route's
+   * provider/default behavior. One-shot only: continuable starts reject an
+   * explicit effort because the durable descriptor format does not yet carry it.
+   */
+  readonly reasoningEffort?: ReasoningEffortId
 }
 
 /**

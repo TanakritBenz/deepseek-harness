@@ -1,0 +1,41 @@
+# Test-only composition: the orchestrate fan-out tool on the real Loader/app
+# path. The scripted model calls `orchestrate` once with two independent
+# subtasks; both run as real in-process spawn children on the same mock model,
+# whose probe-marker answers flow back through the canonical orchestration
+# result into the parent's final answer.
+- id: mock-llm
+  name: './mock-orchestrating-llm.ts'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: spawn
+
+- id: tool-subagent-orchestrate
+  name: '@deepseek-ai/dsh-tool-subagent-orchestrate'
+  config:
+    provider: spawn
+    toolName: orchestrate
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: mock
+        model: mock
+        cwd: !!js process.cwd()
+    persona: 'Test orchestrate parallel fan-out.'
+    workspaceContext: false
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+    compression: 'none'
+
+- id: checkpoint-policy
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'

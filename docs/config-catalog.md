@@ -1208,6 +1208,20 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `anthropic-messages`.
    */
   supportsLongCacheRetention?: boolean
+  /**
+   * Whether a stream that ends without a `finish_reason` is an error;
+   * `false` tolerates it (an endpoint that never sends one) and reads the
+   * turn's stop from its content instead; `openai-completions`.
+   */
+  supportsFinishReason?: boolean
+  /**
+   * Whether the endpoint caps reasoning with a top-level
+   * `thinking_token_budget` instead of a `thinking` block (vLLM servers);
+   * `openai-completions`.
+   */
+  supportsThinkingTokenBudget?: boolean
+  /** Whether the endpoint accepts additional tools in the Responses `tools` array; the three Responses protocols. */
+  supportsAdditionalTools?: boolean
   /** Whether the endpoint accepts per-tool `eager_input_streaming`; `anthropic-messages`. */
   supportsEagerToolInputStreaming?: boolean
   /** Whether the endpoint accepts `cache_control` on tool definitions; `anthropic-messages`. */
@@ -2846,6 +2860,51 @@ export interface Config {
 Depends on: [`AgentOptions`](subsystems/core.md)
 
 Source: [`packages/subagent/tool-subagent/src/index.ts:29`](../packages/subagent/tool-subagent/src/index.ts)
+
+<a id="deepseek-aidsh-tool-subagent-orchestrate"></a>
+
+## `@deepseek-ai/dsh-tool-subagent-orchestrate`
+
+Requires: `tools` · `subagents` · `systemPrompt`
+
+```ts config-catalog
+/** Config: default delegation route plus scheduling bounds for the fan-out. */
+export interface Config {
+  /** The default `ctx.subagents` provider running subtasks without an explicit `provider`. */
+  provider: string
+  /** Model-facing tool name (default `orchestrate`). */
+  toolName?: string
+  /**
+   * Model id used by subtasks that do not name one; omitted fields keep the
+   * child route resolution of the chosen provider (in-process backends inherit
+   * the delegating parent's route).
+   */
+  model?: string
+  /**
+   * Reasoning effort pinned on every subtask that does not name one. Requires
+   * a provider with the `reasoningEffort` capability (mount fails loud
+   * otherwise); per-subtask values need it too.
+   */
+  reasoningEffort?: string
+  /** Maximum concurrently executing subtasks (default `4`; minimum `1`). */
+  maxConcurrency?: number
+  /** Inclusive upper bound on submitted subtasks (default `8`). */
+  maxSubtasks?: number
+  /**
+   * Maximum child depth: a non-negative safe integer (default `3`), or
+   * `'provider-managed'` to send no cap. A numeric cap requires the default
+   * provider's `depthLimit` capability at mount.
+   */
+  maxDepth?: number | 'provider-managed'
+  /**
+   * Whether subtasks may name their own `provider` (default true). Disabled
+   * instances reject any explicit provider at execute time.
+   */
+  allowProviderOverride?: boolean
+}
+```
+
+Source: [`packages/subagent/tool-subagent-orchestrate/src/index.ts:40`](../packages/subagent/tool-subagent-orchestrate/src/index.ts)
 
 <a id="deepseek-aidsh-tool-subagent-report"></a>
 

@@ -10,6 +10,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
+import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
@@ -172,6 +173,23 @@ export function applyChildComposition(
     childCtx.systemPrompt.section({ name: 'deployment:persona', order: 0, text: composition.persona })
   }
   if (composition.toolFilter !== undefined) childCtx.tools.restrict(composition.toolFilter)
+}
+
+/**
+ * Pin one reasoning effort onto every model request of a child agent for the
+ * child's whole scoped lifetime. The listener overwrites any inherited or
+ * route-default effort, mirroring how {@link applyChildComposition} scopes
+ * per-child persona and tool rows: the registration lives on the child's own
+ * scope, so it is invisible to the parent and siblings and unwinds with the
+ * child. Call inside the child's creation window.
+ * @param childCtx - the child agent's scoped creation context.
+ * @param effort - the adapter-owned effort id applied to every request.
+ */
+export function pinChildReasoningEffort(childCtx: Context, effort: ReasoningEffortId): void {
+  childCtx.on('agent/request', async (_payload, next) => {
+    const resolved = await next()
+    return { ...resolved, reasoningEffort: effort }
+  })
 }
 
 /** Policy seeded onto a child session's log at the delegation boundary. */

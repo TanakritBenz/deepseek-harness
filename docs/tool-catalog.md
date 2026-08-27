@@ -34,6 +34,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`, `session_event_search`, `session_event_trace`, `session_search`, `session_trace` | `ctx.tools`, `ctx.systemPrompt`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | The five read-only tools hide provider cursors and authorize every result from the immutable calling agent session. The package is opt-in; compositions that need enforced deadlines or bounded inline output also mount the generic timeout or spill policies. |
 | `@deepseek-ai/dsh-tool-subagent` | `subagent` | `ctx.tools`, `ctx.subagents`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `child session events through the chosen provider` | `subagent`, `subagent_fork` | The registered tool name is the load-time `toolName` config (default `subagent`); the schema above is that default. The shipped compositions load this package once per subagent backend, so the model additionally sees `subagent_fork` bound to the fork backend. Each instance's description, `run_in_background` parameter, and system-prompt policy follow its own `backgroundMode` and `enableRunInBackground`, so the two shipped schemas are not identical: `subagent` is `continuable` and defaults omitted calls to background with automatic settlement delivery, while `subagent_fork` stays `one-shot` and defaults them to foreground — see `packages/bundle/base/cordis.patch.yml` and `examples/acp-agent/cordis.yml`. |
+| `@deepseek-ai/dsh-tool-subagent-orchestrate` | `orchestrate` | `ctx.tools`, `ctx.subagents`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `child session events through the chosen providers` | - | Opt-in divide-and-conquer fan-out over the same seam as `dsh-tool-subagent`: the model authors the subtask graph in one call, this package schedules it with maximal legal parallelism (dependency-ordered, `maxConcurrency`-capped), and every settled outcome returns to the calling agent for review. Not part of any shipped bundle; mount it from a preset or a patch row. Per-subtask provider/model overrides name registered providers directly, an explicit reasoning effort requires that provider's `reasoningEffort` capability, and a failed subtask transitively skips only its dependents. |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`, `ctx.systemPrompt`, `a live continuable in-process child Agent` | `tool/call`, `tool/result`, `a user-role message in the direct parent session` | - | Registered per continuable in-process child rather than globally, so this schema is visible only inside such a child and survives its global `toolFilter`. The same contribution installs the child-scoped `tool:report` prompt section, which this catalog does not render. The parent-facing `send_message` tool is installed independently. |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
@@ -1532,6 +1533,80 @@ Delegate a self-contained task to a subagent (a separate agent that works in its
 Source: [`packages/subagent/tool-subagent/src/index.ts`](../packages/subagent/tool-subagent/src/index.ts)
 
 The registered tool name is the load-time `toolName` config (default `subagent`); the schema above is that default. The shipped compositions load this package once per subagent backend, so the model additionally sees `subagent_fork` bound to the fork backend. Each instance's description, `run_in_background` parameter, and system-prompt policy follow its own `backgroundMode` and `enableRunInBackground`, so the two shipped schemas are not identical: `subagent` is `continuable` and defaults omitted calls to background with automatic settlement delivery, while `subagent_fork` stays `one-shot` and defaults them to foreground — see `packages/bundle/base/cordis.patch.yml` and `examples/acp-agent/cordis.yml`.
+
+<a id="deepseek-aidsh-tool-subagent-orchestrate"></a>
+
+## `@deepseek-ai/dsh-tool-subagent-orchestrate`
+
+### `orchestrate`
+
+Divide a larger task into smaller self-contained subtasks and run them as parallel subagents (a separate agent works on each piece in its own context). Independent subtasks run at the same time; declare dependencies only where one subtask genuinely needs another's result. You orchestrate: each subtask gets a complete standalone prompt (paste in exactly what it needs), and you receive every result back for review and integration — the subagents' intermediate steps stay theirs. Optionally pin a different provider/model/reasoning effort per subtask.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "string",
+      "description": "The overall objective, stated once here; every subtask also needs its own complete prompt."
+    },
+    "subtasks": {
+      "type": "array",
+      "description": "The divided pieces of the task. Make them independent and run them in parallel whenever possible.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable key other subtasks reference in depends_on."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short (3-5 word) description for display."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Complete standalone instructions including all material the subagent needs; it sees nothing else."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Registered ctx.subagents provider to run this subtask (e.g. spawn, fork, claude-code, codex, acp); omit for the default."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model-id override for this subtask."
+          },
+          "effort": {
+            "type": "string",
+            "description": "Reasoning-effort override (adapter-owned id). Requires an in-process provider such as spawn or fork."
+          },
+          "depends_on": {
+            "type": "array",
+            "description": "Subtask ids that must complete before this one starts; omit for immediate parallel start.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "task",
+    "subtasks"
+  ]
+}
+```
+
+Source: [`packages/subagent/tool-subagent-orchestrate/src/index.ts`](../packages/subagent/tool-subagent-orchestrate/src/index.ts)
+
+Opt-in divide-and-conquer fan-out over the same seam as `dsh-tool-subagent`: the model authors the subtask graph in one call, this package schedules it with maximal legal parallelism (dependency-ordered, `maxConcurrency`-capped), and every settled outcome returns to the calling agent for review. Not part of any shipped bundle; mount it from a preset or a patch row. Per-subtask provider/model overrides name registered providers directly, an explicit reasoning effort requires that provider's `reasoningEffort` capability, and a failed subtask transitively skips only its dependents.
 
 <a id="deepseek-aidsh-tool-subagent-control"></a>
 

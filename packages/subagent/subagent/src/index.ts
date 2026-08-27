@@ -105,6 +105,7 @@ export {
   applyChildComposition,
   captureDelegatedPolicyOverrides,
   childSessionMeta,
+  pinChildReasoningEffort,
   resolveChildAgentOptions,
   resolveChildDepth,
   SubagentDepthError,
@@ -210,6 +211,16 @@ export class SubagentRuntime extends Service {
    * @throws when continuation services are unavailable or materialization fails.
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
+    // Continuation composition is rebuilt from the durable descriptor on cold
+    // resume, and that format does not yet carry an effort pin — accepting one
+    // here would silently drop it on the next activation.
+    if (spec.request.reasoningEffort !== undefined) {
+      throw new SubagentError(
+        'continuable subagents do not support reasoningEffort; '
+        + 'delegate a one-shot run with an explicit effort instead',
+        'UNSUPPORTED_CAPABILITY',
+      )
+    }
     return this.requireContinuations().startContinuable(spec)
   }
 
@@ -500,6 +511,7 @@ export class SubagentRuntime extends Service {
       { when: request.maxDepth !== undefined, cap: 'depthLimit' },
       { when: request.toolFilter !== undefined, cap: 'toolFilter' },
       { when: request.persona !== undefined, cap: 'persona' },
+      { when: request.reasoningEffort !== undefined, cap: 'reasoningEffort' },
     ]
     for (const { when, cap } of needs) {
       if (when && !provider.capabilities[cap]) {

@@ -24,6 +24,7 @@ import {
   captureDelegatedPolicyOverrides,
   childSessionMeta,
   finalAssistantOutput,
+  pinChildReasoningEffort,
   resolveChildAgentOptions,
   resolveChildDepth,
 } from '@deepseek-ai/dsh-subagent'
@@ -123,6 +124,9 @@ export async function startInProcessRun(
       persona: request.persona,
       toolFilter: request.toolFilter,
     })
+    if (request.reasoningEffort !== undefined) {
+      pinChildReasoningEffort(childCtx, request.reasoningEffort)
+    }
     if (request.outputSchema !== undefined) {
       structured = attachStructuredRuntime(childCtx, request.outputSchema)
     }

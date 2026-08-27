@@ -38,6 +38,7 @@
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`、`session_event_search`、`session_event_trace`、`session_search`、`session_trace` | `ctx.tools`、`ctx.systemPrompt`、`ctx.sessionQuery`、`a calling Agent for workspace authority` | `tool/call`、`tool/result` | - | 这 5 个只读工具会隐藏提供方游标，并根据不可变的调用 agent 会话为每个结果授权。该包需要选择启用；需要强制截止时间或限制行内输出的组合还会挂载通用超时或 spill 策略。 |
 | `@deepseek-ai/dsh-tool-subagent` | `subagent` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述 schema 对应默认值。随产品发布的组合会为每个 subagent 后端加载一次该包，因此模型还会看到绑定到 fork 后端的 `subagent_fork`。每个实例的描述、`run_in_background` 参数与 system prompt 策略取决于它自己的 `backgroundMode` 和 `enableRunInBackground`，因此两个随附 schema 并不相同：`subagent` 为 `continuable`，省略参数时默认后台运行，并由 runtime 自动投递结束结果；`subagent_fork` 保持 `one-shot`，省略参数时默认前台运行。详见 `packages/bundle/base/cordis.patch.yml` 和 `examples/acp-agent/cordis.yml`。 |
+| `@deepseek-ai/dsh-tool-subagent-orchestrate` | `orchestrate` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`child session events through the chosen providers` | - | 选择启用的分而治之扇出，与 `dsh-tool-subagent` 共用同一 seam：模型在一次调用中编写子任务图，本包以最大合法并行度调度（依赖有序、受 `maxConcurrency` 限制），所有已结算结果返回给调用方 agent 复核。不在任何随产品发布的 bundle 中；请通过 preset 或 patch 行挂载。按子任务的提供方／模型覆盖直接指定已注册提供方，显式推理强度要求该提供方具备 `reasoningEffort` 能力，失败的子任务仅会传递跳过其依赖方。 |
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`、`ctx.systemPrompt`、`a live continuable in-process child Agent` | `tool/call`、`tool/result`、`a user-role message in the direct parent session` | - | 按可继续的进程内子级注册，而非全局注册，因此该 schema 仅在这种子级内部可见，并且不受其全局 `toolFilter` 影响。同一份贡献还会安装子级作用域的 `tool:report` 系统提示词 section，本目录不渲染该 section。面向父级的 `send_message` 工具单独安装。 |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
@@ -1538,6 +1539,80 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 来源：[`packages/subagent/tool-subagent/src/index.ts`](../packages/subagent/tool-subagent/src/index.ts)
 
 注册的工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述 schema 对应默认值。随产品发布的组合会为每个 subagent 后端加载一次该包，因此模型还会看到绑定到 fork 后端的 `subagent_fork`。每个实例的描述、`run_in_background` 参数与 system prompt 策略取决于它自己的 `backgroundMode` 和 `enableRunInBackground`，因此两个随附 schema 并不相同：`subagent` 为 `continuable`，省略参数时默认后台运行，并由 runtime 自动投递结束结果；`subagent_fork` 保持 `one-shot`，省略参数时默认前台运行。详见 `packages/bundle/base/cordis.patch.yml` 和 `examples/acp-agent/cordis.yml`。
+
+<a id="deepseek-aidsh-tool-subagent-orchestrate"></a>
+
+## `@deepseek-ai/dsh-tool-subagent-orchestrate`
+
+### `orchestrate`
+
+将一项更大任务拆分为更小的自包含子任务，并作为并行 subagent 运行（每个子任务由独立 agent 在各自上下文中处理）。独立子任务同时执行；仅在某子任务确实需要另一子任务结果时才声明依赖。你负责编排：每个子任务获得完整独立的提示词（按需粘贴其所需全部材料），所有结果都会返回给你复核与整合，subagent 的中间步骤保留在它们各自内部。每个子任务可按需固定不同的提供方／模型／推理强度。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "string",
+      "description": "The overall objective, stated once here; every subtask also needs its own complete prompt."
+    },
+    "subtasks": {
+      "type": "array",
+      "description": "The divided pieces of the task. Make them independent and run them in parallel whenever possible.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable key other subtasks reference in depends_on."
+          },
+          "title": {
+            "type": "string",
+            "description": "Short (3-5 word) description for display."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Complete standalone instructions including all material the subagent needs; it sees nothing else."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Registered ctx.subagents provider to run this subtask (e.g. spawn, fork, claude-code, codex, acp); omit for the default."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model-id override for this subtask."
+          },
+          "effort": {
+            "type": "string",
+            "description": "Reasoning-effort override (adapter-owned id). Requires an in-process provider such as spawn or fork."
+          },
+          "depends_on": {
+            "type": "array",
+            "description": "Subtask ids that must complete before this one starts; omit for immediate parallel start.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "task",
+    "subtasks"
+  ]
+}
+```
+
+来源：[`packages/subagent/tool-subagent-orchestrate/src/index.ts`](../packages/subagent/tool-subagent-orchestrate/src/index.ts)
+
+选择启用的分而治之扇出，与 `dsh-tool-subagent` 共用同一 seam：模型在一次调用中编写子任务图，本包以最大合法并行度调度（依赖有序、受 `maxConcurrency` 限制），所有已结算结果返回给调用方 agent 复核。不在任何随产品发布的 bundle 中；请通过 preset 或 patch 行挂载。按子任务的提供方／模型覆盖直接指定已注册提供方，显式推理强度要求该提供方具备 `reasoningEffort` 能力，失败的子任务仅会传递跳过其依赖方。
 
 <a id="deepseek-aidsh-tool-subagent-control"></a>
 

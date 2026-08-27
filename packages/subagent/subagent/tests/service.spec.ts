@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent } from '@deepseek-ai/dsh-agent'
 
-import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { HarnessError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
 import SubagentRuntime, {
   foldSubagentDescriptor,
@@ -24,8 +24,8 @@ function fakeParent(id = 'parent-1'): Agent {
   return { id: SessionId(id) } as unknown as Agent
 }
 
-const ALL_CAPS: SubagentCapabilities = { outputSchema: true, depthLimit: true, toolFilter: true, persona: true }
-const NO_CAPS: SubagentCapabilities = { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }
+const ALL_CAPS: SubagentCapabilities = { outputSchema: true, depthLimit: true, toolFilter: true, persona: true, reasoningEffort: true }
+const NO_CAPS: SubagentCapabilities = { outputSchema: false, depthLimit: false, toolFilter: false, persona: false, reasoningEffort: false }
 
 function baseRequest(overrides: Partial<SubagentStartRequest> = {}): SubagentStartRequest {
   return {
@@ -166,6 +166,7 @@ describe('SubagentRuntime', () => {
     ['depthLimit', { maxDepth: 1 }],
     ['toolFilter', { toolFilter: { deny: ['bash'] } }],
     ['persona', { persona: 'reviewer' }],
+    ['reasoningEffort', { reasoningEffort: ReasoningEffortId('high') }],
   ] as const)('rejects unsupported %s before provider startup', async (_capability, override) => {
     const { subagents } = await service()
     const provider = new StubProvider('weak', NO_CAPS)
@@ -173,6 +174,27 @@ describe('SubagentRuntime', () => {
     await expect(subagents.start('weak', baseRequest(override)))
       .rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
     expect(provider.startCount).toBe(0)
+  })
+
+  it('passes an explicit reasoningEffort through to a capable provider untouched', async () => {
+    const { subagents } = await service()
+    const provider = new StubProvider('strong')
+    subagents.registerProvider(provider)
+    const run = await subagents.start('strong', baseRequest({ reasoningEffort: ReasoningEffortId('high') }))
+    expect(provider.lastRequest?.reasoningEffort).toBe('high')
+    await run.dispose()
+  })
+
+  it('rejects an explicit reasoningEffort on a continuable start before any child resource is reserved', async () => {
+    const { subagents } = await service()
+    // No continuation runtime is mounted: the effort rejection must win over
+    // CONTINUATION_UNAVAILABLE so the caller learns the capability rule.
+    await expect(subagents.startContinuable({
+      provider: 'unused',
+      label: 'unused child',
+      request: baseRequest({ reasoningEffort: ReasoningEffortId('high') }),
+      signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' })
   })
 
   it('validates depth and schema semantics before provider startup', async () => {
